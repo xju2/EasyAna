@@ -1,0 +1,69 @@
+tree_name: DiMuonNtuple
+weight_name: weight
+branches:
+    - weight
+    - Event_MET
+    - Muons_Eta_Lead
+    - Muons_Phi_Lead
+    - Muons_PT_Lead
+    - Muons_Eta_Sub
+    - Muons_Phi_Sub
+    - Muons_PT_Sub
+    - Muons_Charge_Lead
+    - Muons_CosThetaStar
+    - Muons_Minv_MuMu
+    - Muons_Minv_MuMu_Fsr
+    - Muons_Minv_MuMu_Fsr_nearOnly
+    - DiJet_Minv
+    - DiJet_PT
+    - DiJet_Rapidity
+    - Dphi_JZ_Lead
+    - Dphi_JZ_Sub
+    - Jets_PT_Lead
+    - Jets_Eta_Lead
+    - Jets_PT_Sub
+    - Jets_Eta_Sub
+    - Jets_jetMultip
+    - Jets_Phi_Lead
+    - Jets_Phi_Sub
+    - Z_Rapidity
+    - Z_PT
+    - FSR_Et
+    - FSR_Eta
+    - FSR_Phi
+
+rename_branches:
+    Event_XGB_Ht_16_Category: Event_XGB_Category
+    ClassOut_XGB_Ht_Higgs: ClassOut_XGB_Higgs_Norm
+    ClassOut_XGB_Ht_VBF: ClassOut_XGB_VBF_Norm
+
+hists: # ['hist-type', 'hist-name', 'branch-name', low, high, nbins, xlabel, ylabel]
+    - [TH1F, ClassOut_XGB_Higgs_Norm, 0, 1, 200, ClassOut_XGB_Higgs, 'Entries']
+    - [TH1F, ClassOut_XGB_VBF_Norm, 0, 1, 200, ClassOut_XGB_VBF, Entries]
+    - [TH1F, Event_MET, 0, 200, 200, "Event_MET [GeV]", "Arb. Unit / 1 GeV"]
+    - [TH1F, Muons_Eta_Lead, -3., 3, 100, Muons_Eta_Lead, "Arb. Unit / 0.1"]
+    - [TH1F, Muons_Phi_Lead, -3.2, 3.2, 64, Muons_Phi_Lead, "Arb. Unit / 0.1"]
+    - [TH1F, Muons_PT_Lead,0, 400, 200, "Muons_PT_Lead [GeV]", "Arb. Unit / 1 GeV"]
+    - [TH1F, Muons_Eta_Sub, -3., 3, 100, Muons_Eta_Sub, "Arb. Unit / 0.1"]
+    - [TH1F, Muons_Phi_Sub, -3.2, 3.2, 64, Muons_Phi_Sub, "Arb. Unit / 0.1"]
+    - [TH1F, Muons_PT_Sub, 0, 400, 200, "Muons_PT_Sub [GeV]", "Arb. Unit / 1 GeV"]
+    - [TH1F, Muons_Charge_Lead, -1.5, 1.5, 3, Muons_Charge_Lead, "Arb. Unit"]
+    - [TH1F, Muons_CosThetaStar, -1., 1, 200, Muons_CosThetaStar, "Arb. Unit / 0.1"]
+    - [TH1F, Muons_Minv_MuMu, 0, 300, 3000, "Muons_Minv_MuMu [GeV]", "Arb. Unit / 0.1 GeV"]
+    - [TH1F, Muons_Minv_MuMu_Fsr, 0, 300, 3000, "Muons_Minv_MuMu_Fsr [GeV]", "Arb. Unit / 0.1 GeV"]
+    - [TH1F, Muons_Minv_MuMu_Fsr_nearOnly, 0, 300, 3000, "Muons_Minv_MuMu_Fsr_nearOnly [GeV]", "Arb. Unit / 0.1 GeV"]
+    - [TH1F, Z_PT_FSR_nearOnly, 0, 400, 200, Z_PT_FSR_nearOnly, Entries]
+    - [TH1F, Z_PT_FSR_LOG_nearOnly, -3., 6, 400, Z_PT_FSR_LOG_nearOnly, Entries]
+    - [TH1F, DiJet_Minv, 0, 1000, 1000, DiJet_Minv, Entries]
+    - [TH1F, DiJet_PT, 0, 400, 400, DiJet_PT, Entries]
+    - [TH1F, Jets_PT_Lead, 0, 400, 400, "Jets_PT_Lead [GeV]", "Arb. Unit / 1 GeV"]
+    - [TH1F, Jets_Eta_Lead, -5., 5, 100, Jets_Eta_Lead, "Arb. Unit / 0.1"]
+    - [TH1F, Jets_PT_Sub, 0, 400, 400, "Jets_PT_Sub [GeV]", "Arb. Unit / 1 GeV"]
+    - [TH1F, Jets_Eta_Sub, -5., 5, 100, Jets_Eta_Sub, "Arb. Unit / 0.1"]
+    - [TH1F, DiJet_Rapidity, -6, 6, 100, DiJet_Rapidity, Entries]
+    - [TH1F, Jets_Phi_Lead, -3.2, 3.2, 64, Jets_Phi_Lead, "Arb. Unit / 0.1"]
+    - [TH1F, Jets_Phi_Sub, -3.2, 3.2, 64, Jets_Phi_Sub, "Arb. Unit / 0.1"]
+    - [TH1F, Dphi_JZ_Lead, -3.2, 3.2, 100, "#Delta#Phi(j_{1}, Z)", Entries]
+    - [TH1F, Dphi_JZ_Sub, -3.2, 3.2, 100, "#Delta#Phi(j_{2}, Z)", Entries]
+    - [TH1F, Z_Rapidity, -6., 6, 100, "Dilepton_Rapidity", Entries]
+    - [TH1F, Jets_jetMultip, -0.5, 10.5, 11, "Jet Multiplicity", "Arb. Unit"]

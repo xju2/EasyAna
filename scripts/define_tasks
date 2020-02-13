@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+"""
+
+Walk through input directory and find ROOT files. If additional arguments are
+provided, only files that include one of the arguments will be included.
+
+"""
+
+import ROOT
+ROOT.gROOT.SetBatch(True)
+
+import sys, os
+
+
+def main(options, args):
+
+    # output file with one task per line
+    tasks_file = open('tasks.txt', 'w')
+
+    # r=root, d=directories, f=files
+    for r, d, f in os.walk(options.input):
+        for file in f:
+            if file.endswith(".root"):
+
+                # process only files that match one
+                # of the extra arguments
+                if len(args):
+                    accept = False
+                    for arg in args:
+                        if arg in file:
+                            accept = True
+                    if not accept:
+                        continue
+                
+                # file path
+                file_path = os.path.join(r, file)
+
+                # get number of events in file
+                root_file = ROOT.TFile(file_path, "READ")
+                t = root_file.Get(options.tree)
+                n = t.GetEntries()
+                root_file.Close()
+
+                # define tasks
+                for start in range(0, n+1, int(options.max_events)):
+                    # last event to process
+                    end = min(start+options.max_events-1, n)
+                    # line to be written out
+                    line = "%s\t%s\t%s\n" % (
+                        file_path, start, end )
+                    # write the line
+                    tasks_file.write(line)
+
+    # close file
+    tasks_file.close()
+
+if __name__ == "__main__":
+    import optparse
+    parser = optparse.OptionParser(description=globals()["__doc__"])
+
+    # ----------------------------------------------------
+    # Parse input
+    # ----------------------------------------------------
+    parser.add_option('-i', '--input',
+                      action="store", dest="input",
+                      help="folder with input files")
+    parser.add_option('-n', '--events-per-task',
+                      action="store", dest="max_events",
+                      help="number of events per task",
+                      default=1000000)
+    parser.add_option('-t', '--tree',
+                      action="store", dest="tree",
+                      help="name of the TTree object in input files")
+
+    # parse input arguments
+    options, args = parser.parse_args()
+
+    # required arguments
+    assert options.input
+    assert options.tree
+
+    main(options, args)

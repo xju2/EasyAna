@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+"""
+
+Process all tasks in a given input tasks file with the
+executable provided in extra arguments.
+
+"""
+
+import sys, os
+import subprocess
+import ray
+
+
+@ray.remote
+def execute_dry(job):
+    print (job)
+    return
+
+@ray.remote
+def execute(job):
+    # unique log file name
+    log_file = os.path.basename(job[-3]).replace(".root", ".%s.%s.txt" % (
+        job[-2], job[-1] ))
+
+    # log file stream
+    out_stream = open(log_file, 'w')
+
+    # execute
+    p = subprocess.call(job, stdout=out_stream)
+
+    # return exit code
+    return p
+
+def print_progress(progress, total):
+    sys.stdout.write("Job progress: %d/%d [%d%%]   \r" % (progress, total, 100*progress/total) )
+    sys.stdout.flush()
+
+def main(options, args):
+
+    # initialize Ray
+    if not options.local:
+        # running on cluster
+        ray.init(redis_address="%s" % options.redis_address,
+                 redis_password="%s" % options.redis_password)
+    else:
+        # running locally
+        ray.init(num_cpus=int(options.num_processes), ignore_reinit_error=True)
+
+    # save tasks in an array
+    tasks = []
+    with open(options.input, 'r') as f:
+        for line in f:
+            tasks += [args + line.split()]
+
+    # total number of jobs
+    total = len(tasks)
+
+    # real or fake executable
+    if options.dry_run:
+        exe = execute_dry
+    else:
+        exe = execute
+
+    # launch tasks with ray
+    remaining_ids = []
+    for task in tasks:
+        remaining_ids += [exe.remote(task)]
+    
+    # wait for jobs to finish
+    progress = 0
+    print_progress(progress, total)
+    while remaining_ids:
+        ready_ids, remaining_ids = ray.wait(remaining_ids)
+        progress += len(ready_ids)
+        print_progress(progress, total)
+
+    if options.timeline:
+        # timeline
+        ray.timeline(filename="timeline.json")
+
+if __name__ == "__main__":
+    import optparse
+    parser = optparse.OptionParser(description=globals()["__doc__"])
+
+    # ----------------------------------------------------
+    # Parse input
+    # ----------------------------------------------------
+    parser.add_option('-i', '--input',
+                      action="store", dest="input",
+                      help="input tasks file",
+                      default="tasks.txt")
+    parser.add_option('-l', '--local',
+                      action="store_true", dest="local",
+                      help="rune locally on one node",
+                      default=False)
+    parser.add_option('-p', '--num-processes',
+                      action="store", dest="num_processes",
+                      help="number of processes for local running")
+    parser.add_option('--dry-run',
+                      action="store_true", dest="dry_run",
+                      help="only print out tasks, no actual running",
+                      default=False)
+    parser.add_option('--redis-address',
+                      action="store", dest="redis_address",
+                      help="ip address of the Ray head node")
+    parser.add_option('--redis-password',
+                      action="store", dest="redis_password",
+                      help="password of the Redis server")
+    parser.add_option('--timeline',
+                      action="store_true", dest="timeline",
+                      help="save Ray timeline")
+
+    # parse input arguments
+    options, args = parser.parse_args()
+
+    # get the executable
+    assert len(args) > 0, "No executable provided!"
+
+    # required arguments
+    assert options.input
+
+    # set default ip and password for non-local running
+    if not options.local:
+        if not options.redis_address:
+            options.redis_address = "%s:%s" % (os.environ["RAY_HEAD_IP"], os.environ["RAY_REDIS_PORT"])
+            options.redis_password = os.environ["RAY_REDIS_PASSWORD"]
+    else:
+        if not options.num_processes:
+            options.num_processes = os.environ["RAY_NWORKERS"]
+
+    # print
+    print ("Processing tasks from %s with executable %s" % (
+        options.input, args ))
+
+    main(options, args)

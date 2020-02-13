@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Number of ray workers per node (e.g. 32 for Haswell or 124 for KNL)
+if [ -z "$1" ]
+then
+    echo "No argument supplied; setting NUM_WORKERS to 32."
+    NUM_WORKERS=32
+else
+    NUM_WORKERS=$1
+fi
+
+export OPENBLAS_NUM_THREADS=1
+export RAY_REDIS_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+export RAY_HEAD_IP=`hostname -i`
+export RAY_REDIS_PORT=6379
+export RAY_NWORKERS=$NUM_WORKERS
+
+# start ray head node
+srun -N1 -n1 -w $SLURMD_NODENAME \
+    ray start --head --redis-port=$RAY_REDIS_PORT --redis-password=$RAY_REDIS_PASSWORD --num-cpus=$RAY_NWORKERS --block &
+
+# wait for head node to start ray
+ray_sync
+
+# start ray on all other nodes
+srun -x $SLURMD_NODENAME -N`expr $SLURM_JOB_NUM_NODES - 1` -n`expr $SLURM_JOB_NUM_NODES - 1` \
+    ray start --redis-address $RAY_HEAD_IP:$RAY_REDIS_PORT --redis-password $RAY_REDIS_PASSWORD --num-cpus=$RAY_NWORKERS --block &
+
+# wait for worker nodes to connect to the main node
+ray_sync --wait-workers

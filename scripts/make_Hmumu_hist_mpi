@@ -1,0 +1,281 @@
+#!/usr/bin/env python
+"""
+Read a ROOT file and produce histograms
+"""
+from __future__ import print_function
+from __future__ import division
+
+import time
+import ROOT
+import numpy as np
+import numpy.lib.recfunctions as rfn
+from root_numpy import tree2array
+import subprocess
+
+from FastAnalysis import utils
+
+if __name__ == "__main__":
+    import argparse
+    import os
+    import yaml
+
+    parser = argparse.ArgumentParser(description='Make Histograms from Hmumu Ntuples')
+    add_arg = parser.add_argument
+    add_arg('config', type=str, help='config file')
+    add_arg('file_name', help='input file name')
+    add_arg('out_name', help='output root file name')
+    add_arg('--no-mpi', action="store_true", help='do not use MPI')
+    add_arg('--reweight-file', nargs='?', help='perform reweighting', default=None,
+            const='/global/project/projectdirs/atlas/xju/examples/H5vsROOT/weights.root')
+
+    args = parser.parse_args()
+    t_start = time.time()
+
+    file_name = args.file_name
+    outname = args.out_name
+    print(outname)
+    if os.path.exists(outname):
+        print("{} is there".format(outname))
+        exit(0)
+
+    outdir = os.path.dirname(outname)
+    if outdir and not os.path.exists(outdir):
+        os.makedirs(outdir)
+
+    # data analysis configurations
+    n_categories = 16
+    category_name = 'Event_XGB_Category'
+    njet_name = 'Jets_jetMultip'
+    reweight_file = args.reweight_file
+    reweight_Zpt_histname = "Z_PT_FSR_LOG_nearOnly"
+    reweight_Zpt_branchname = "Z_PT_FSR_LOG_nearOnly"
+
+    no_mpi = args.no_mpi
+    rank = 0
+    size = 1
+    has_mpi = False
+    if not no_mpi:
+        try:
+            from mpi4py import MPI
+        except ImportError:
+            print("mpi4py is missing. MPI not used")
+        else:
+            comm = MPI.COMM_WORLD
+            size = comm.Get_size()
+            rank = comm.Get_rank()
+            print("World size:", size, ", rank:", rank)
+            has_mpi = True
+
+    no_mpi = no_mpi or not has_mpi
+    if rank == 0:
+        out_tmp_dir = os.path.join(outdir, 'Jobs')
+        if not os.path.exists(out_tmp_dir):
+            os.makedirs(out_tmp_dir)
+
+        with open(args.config) as f:
+            if hasattr(yaml, "FullLoader"):
+                config = yaml.load(f, Loader=yaml.FullLoader)
+            else:
+                config = yaml.load(f)
+
+        tree_name = config['tree_name']
+        chain = ROOT.TChain(tree_name, tree_name)
+        chain.Add(file_name)
+        nentries = chain.GetEntries()
+        print("Total {} ranks deal with {} events".format(size, nentries))
+
+        entries_per_job = nentries//size
+        jobs = [(idx*entries_per_job, (idx+1)*entries_per_job) for idx in range(size-1)]
+        jobs += [((size-1)*entries_per_job, nentries)]
+
+        jobs = [x.tolist() for x in np.array_split(jobs, size)]
+        del chain
+
+        # read reweight histogram
+        if reweight_file is not None:
+            print("Reading weight file: {}".format(reweight_file))
+            ZpT_weight_dict = utils.get_Zpt_weights(reweight_file, reweight_Zpt_histname)
+        else:
+            ZpT_weight_dict = None
+    else:
+        jobs = None
+        config = None
+        ZpT_weight_dict = None
+
+    if no_mpi:
+        jobs = jobs[0]
+    else:
+        comm.Barrier()
+        jobs = comm.scatter(jobs, root=0)
+        config = comm.bcast(config, root=0)
+        ZpT_weight_dict = comm.bcast(ZpT_weight_dict, root=0)
+
+    # read configuration
+    tree_name = config['tree_name']
+    weight_name = config['weight_name']
+    hist_opts = config['hists']
+    branches = config['branches']
+    try:
+        renaming_dict = config['rename_branches']
+        if rank == 0:
+            print(renaming_dict)
+    except KeyError:
+        renaming_dict = None
+
+    selection = None
+    evt_range = jobs[0]
+    print("rank {} has dealing events from {} to {:,}".format(rank, *evt_range))
+
+    # read input file
+    # start to counting time for the analysis
+    t_start_ana = time.time()
+
+    chain = ROOT.TChain(tree_name, tree_name)
+    chain.Add(file_name)
+    event_info = tree2array(chain,
+                            branches=None, # all branches
+                            selection=None, # no selection
+                            start=evt_range[0],
+                            stop=evt_range[1])
+    t_read_file = time.time()
+
+
+    # renaming
+    if renaming_dict is not None:
+        event_info = rfn.rename_fields(event_info, renaming_dict)
+
+    t_rename_fields = time.time()
+
+    # apply event selections
+    mass_name = 'Muons_Minv_MuMu_Fsr_nearOnly'
+    sel_mask = (event_info[mass_name] > 110)\
+            & (event_info['Muons_PT_Lead'] > 27)\
+            & (event_info['Muons_PT_Sub'] > 15)
+
+    event_info = event_info[sel_mask]
+    t_evt_selections = time.time()
+
+    # add new variables: Z_PT_FSR_nearOnly and Z_PT_FSR_LOG_nearOnly
+    z_pt_info = utils.add_new_variables(event_info)
+    t_add_new_variables = time.time()
+    event_info = utils.merge_arrays(z_pt_info, event_info)
+    t_merge_new_variables = time.time()
+
+
+    # event level weights
+    if weight_name != "None":
+        if '*' in weight_name:
+            weight_names = weight_name.split('*')
+            weights = 1
+            for weight_name in weight_names:
+                print("multiplying weights {}".format(weight_name))
+                weights = weights * event_info[weight_name]
+        else:
+            weights = event_info[weight_name]
+
+    else:
+        weights = None
+
+    if weights is not None:
+        if ZpT_weight_dict is not None:
+            print("{} performing Z PT reweighting".format(rank))
+            for jet_idx in range(3):
+                if jet_idx== 2:
+                    mask = (event_info[njet_name] >= 2)
+                else:
+                    mask = (event_info[njet_name] == jet_idx)
+
+                weight_dict = ZpT_weight_dict[jet_idx]
+                # this temporary matrix is very much needed, otherwise it does work
+                tmp_weight = weights[mask]
+                for low, high, value in weight_dict:
+                    mask_bin = (event_info[reweight_Zpt_branchname][mask] >= low) & (event_info[reweight_Zpt_branchname][mask] < high)
+                    tmp_weight[mask_bin] = tmp_weight[mask_bin] / value
+
+                weights[mask] = tmp_weight
+
+
+    t_prepare_weights = time.time()
+
+    # now make histograms
+    histograms = []
+    h_postfix = "Inc"
+    histograms += utils.make_hist(event_info, hist_opts, h_postfix, weights)
+
+    # In jet multiplicity
+    for ijet in range(3):
+        if ijet == 2:
+            mask = event_info[njet_name] >= 2
+        else:
+            mask = event_info[njet_name] == ijet
+
+        h_postfix = '{}Jet'.format(ijet)
+        histograms += utils.make_hist(event_info, hist_opts, h_postfix, weights, mask)
+
+    # Categories
+    for icat in range(n_categories):
+        h_postfix = 'BDT_{}'.format(icat)
+        mask = event_info[category_name] == icat+1
+        histograms += utils.make_hist(event_info, hist_opts, h_postfix, weights, mask)
+
+    t_make_hists = time.time()
+    time_label = ['Preparation', 'ReadFile', 'RenameFileds',
+                  'Selections', 'AddNewVar', 'MergeNewVar', 'GetWeights', 'Histograming']
+    time_info = [
+        t_start_ana - t_start,
+        t_read_file - t_start_ana,
+        t_rename_fields - t_read_file,
+        t_evt_selections - t_rename_fields,
+        t_add_new_variables - t_rename_fields,
+        t_merge_new_variables- t_add_new_variables,
+        t_prepare_weights - t_merge_new_variables,
+        t_make_hists - t_prepare_weights,
+    ]
+
+    if not no_mpi:
+        # with MPI, write out individual output
+        # write out to root file
+        outname_rank = os.path.basename(outname).replace('.root', '_{}.root')
+        out_tmp_dir = os.path.join(outdir, 'Jobs')
+        outfile = ROOT.TFile.Open(os.path.join(out_tmp_dir, outname_rank.format(rank)), 'recreate')
+        for hist in histograms:
+            hist.Write()
+
+        h_time = ROOT.TH1F("timing", "timing", 20, 0.5, 20.5)
+        for idx, label in enumerate(time_label):
+            h_time.GetXaxis().SetBinLabel(idx+1, label)
+            h_time.SetBinContent(idx+1, time_info[idx])
+        h_time.Write()
+
+        outfile.Close()
+        comm.barrier()
+        if rank == 0:
+            # merge all histograms
+            cmd = ['hadd', outname] + [os.path.join(out_tmp_dir, outname_rank.format(x)) for x in range(size)]
+            subprocess.call(args=cmd)
+    else:
+
+        outfile = ROOT.TFile.Open(outname, 'recreate')
+        for hist in histograms:
+            hist.Write()
+
+        h_time = ROOT.TH1F("timing", "timing", 20, 0.5, 20.5)
+        for idx, label in enumerate(time_label):
+            h_time.GetXaxis().SetBinLabel(idx+1, label)
+            h_time.SetBinContent(idx+1, time_info[idx])
+        h_time.Write()
+
+        outfile.Close()
+        # write out timing info
+        out = "Timing Info\n\
+              {:.1f}s in preparing configurations\n\
+              {:.1f}s in reading files\n\
+              {:.1f}s in renaming fileds\n\
+              {:.1f}s in event selections\n\
+              {:.1f}s in adding new variables\n\
+              {:.1f}s in merging new variables\n\
+              {:.1f}s in preparing weights\n\
+              {:.1f}s in making histograms\n".format(
+                  *time_info
+              )
+        print(out)

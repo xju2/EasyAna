@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+"""
+A simple test of MPI
+"""
+
+from mpi4py import MPI
+import numpy as np
+
+if __name__ == "__main__":
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+    rank = comm.Get_rank()
+    #print("Size:", size,"; Rank:", rank)
+
+    if rank==0:
+        nentries = 100.
+        entries_per_job = nentries//size
+        print("Total {} ranks deal with {} events, each {} events".format(
+            size, nentries, entries_per_job))
+
+        jobs = [(idx*entries_per_job, (idx+1)*entries_per_job) for idx in range(size-1)]
+        jobs += [((size-1)*entries_per_job, nentries)]
+        jobs = [x.tolist() for x in np.array_split(jobs, size)]
+
+        config = {"file_name":"HelloKitty.root"}
+    else:
+        jobs = None
+        config = None
+
+    jobs = comm.scatter(jobs, root=0)
+    config = comm.bcast(config, root=0)
+
+    evt_range = jobs[0]
+    print("{} rank deals events from {:.0f} to {:.0f}".format(rank, *evt_range))
+    print("config is: ")
+    print(config)
